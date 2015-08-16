@@ -1,0 +1,112 @@
+---
+title: "Practical Machine Learning - Course Project"
+author:  "Michelle Young"
+---
+
+###Synopsis
+Personal activity data was collected, quantifying how well they perform a particular activity.  Using data from accelerometers on various body parts of 6 participants, a machine learning algorithm was devised to predict the manner in which the participant did the exercise.
+
+Further information can be found [here](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset). 
+
+###Install Required Packages
+```{r}
+library(taRifx)
+library(caret)
+library(randomForest)
+```
+
+###Data Sources
+The dataset used to create and validate the model can be found here: [training dataset](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+The test data used for the final predictions can be found here:  [testing dataset](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+###Download and Import Datasets
+Preliminary analysis on the raw datasets show that there are values in some variables that are missing or error values (NA, blanks, div by 0).  Remove these values in the read.csv run.
+```{r}
+setInternet2(TRUE)
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile="pml-training.csv")
+training <- read.csv("pml-training.csv", na.strings = c("NA","","#DIV/0!"))
+nrow(training)  
+
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile="pml-testing.csv")
+testing <- read.csv("pml-testing.csv", na.strings = c("NA","","#DIV/0!"), header=TRUE)
+nrow(testing)
+```
+
+###Additional Data Cleansing
+Remove columns 1-7 from training, since these variables are non-predictor covariates.
+```{r}
+training <- training[, 8:160]
+```
+
+Identify variables with near zero variance using the nearZeroVar function.  The parameter saveMetrics=FALSE returns a vector of integers corresponding to the column positions of the problematic predictors.
+```{r}
+nsv <- nearZeroVar(training, saveMetrics=FALSE)
+nsv
+
+#Remove variables from nearZeroVar vector indicated as problematic predictors
+training <- training[, -c(7, 10, 19, 44, 45, 46, 47, 48, 49, 50,  51,  52,  82,  85,  94, 120, 123, 132, 135, 136, 137, 138, 139, 140, 141, 142, 143) ]
+```
+
+As there are still variables with value NA, first convert the integer types to numeric, then reassign NAs to zero.
+```{r}
+#Use the taRifx package to change variable types
+training <- japply(training, which(sapply(training, class)=="integer"), as.numeric)
+
+#change NAs to 0
+training[is.na(training)] <- 0
+```
+
+
+###Model Build
+After testing various machine learning algorithms, the most accurate was the random forest.  As this is labor-intensive on CPU, a project training set was created using 40% of the training set and the remaining 60% used for validation.  The random forest call was also restricted to ntree=100.
+
+The 'classe' variable is the target variable with values `r unique(training$classe)`.
+
+```{r}
+#Split into training and validation sets
+inTrain <- createDataPartition(y=training$classe, p=0.4, list=FALSE)
+proj_train <- training[inTrain, ]
+proj_val<- training[-inTrain, ]
+
+#Build random forest on training set (proj_train)
+mod_rf <- randomForest(classe ~ ., data=proj_train, ntree=100)
+```
+
+###Predicting New Values
+Apply model to the validation set.  
+```{r}
+pred <- predict(mod_rf, proj_val)
+
+#Confusion Matrix
+cm <- confusionMatrix(pred, proj_val$classe)
+cm
+
+```
+
+Based on results from the confusion matrix, the accuracy of the model is `r cm$overall[1]`.
+
+The out of sample error is 1-Accuracy, so for this random forest it is:  `r 1-cm$overall[1]`.
+
+###Apply Random Forest Model to Testing Set
+```{r}
+#Apply same data transformations to the testing set as the training set 
+testing <- japply(testing, which(sapply(training, class)=="integer"), as.numeric)
+testing[is.na(testing)] <- 0
+
+#Apply random forest model to testing set
+predict_test <- predict(mod_rf, testing)
+predict_test
+
+#Write output files for submission
+answers = rep("A", 20)
+
+pml_write_files = function(x){
+        n = length(x)
+        for(i in 1:n){
+                filename = paste0("problem_id_",i,".txt")
+                write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+        }
+}
+pml_write_files(predict_test)
+```
